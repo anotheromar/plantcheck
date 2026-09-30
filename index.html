@@ -44,7 +44,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
-.wrap { max-width: 560px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 18px; }
+.wrap { max-width: 560px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 h1 { font: 800 1.9rem/1 var(--display); letter-spacing: -0.02em; margin: 0; }
 h1 span { color: var(--accent); }
@@ -124,6 +124,9 @@ mark.maybe { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
 .fold.bad .count { background: var(--bad-bg); color: var(--bad); }
 .fold-body { padding: 0 12px 12px; display: grid; gap: 6px; }
 .fold h4 { margin: 4px 0 0; font: 500 .68rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.warn-box { background: var(--warn-bg); color: var(--ink); border-radius: 10px; padding: 10px 12px; font-size: .88rem; }
+.warn-box b { color: var(--warn); }
+.warn-box a { color: var(--accent); }
 .score .parts { font-size: .82rem; color: var(--muted); }
 .score .parts b { color: var(--ink); font-weight: 600; }
 .fold .pill { min-width: 3.4em; text-align: center; }
@@ -132,7 +135,7 @@ mark.maybe { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
 .note a { color: var(--accent); }
 
 .history h3 { margin: 0 0 8px; font: 500 .72rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-.history ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.history ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .history li button { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; font-weight: 500; }
 .history li button span.n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
@@ -321,7 +324,8 @@ const HEALTH_RULES = [
   ["bad", /\bcoconut (oil|fat)\b|\bshortening\b|\bmargarine\b/, "high in saturated fat", 1],
   ["bad", /\b(bacon|ham|salami|sausages?|pepperoni|chorizo)\b/, "processed meat", 2],
   ["bad", /\be25[0-2]\b|\bnitrite|\bnitrate/, "nitrite or nitrate preservative", 2],
-  ["bad", /\b(aspartame|acesulfame|sucralose|saccharin|cyclamate)|\be95[0-5]\b|\be962\b/, "artificial sweetener", 1.5],
+  ["bad", /\baspartame\b|\be951\b|\be962\b/, "sweetener the WHO cancer agency lists as possibly carcinogenic (2023)", 2],
+  ["bad", /\b(acesulfame|sucralose|saccharin|cyclamate)|\be95[0245]\b/, "artificial sweetener; long-term effects, including cancer links, still under study", 1.5],
   ["bad", /\be171\b|\btitanium dioxide\b/, "titanium dioxide, banned in EU food since 2022", 1.5],
   ["bad", /\be1(02|04|10|22|24|29)\b|\b(tartrazine|sunset yellow|allura red|ponceau|azorubine|carmoisine|quinoline yellow)\b/, "synthetic dye", 1],
   ["bad", /\be150[cd]\b|\bcaramel colou?r\b/, "caramel colouring", 1],
@@ -412,7 +416,10 @@ function nutritionScore(p) {
   const n = p.nutriments || {};
   const val = k => n[k] == null || n[k] === "" || !Number.isFinite(Number(n[k])) ? null : Number(n[k]);
   if (["sugars_100g", "fat_100g", "salt_100g"].every(k => val(k) == null)) return null;
-  const drink = (p.categories_tags || []).includes("en:beverages");
+  // Many products have no category, so also go by the name and the quantity unit.
+  const drink = (p.categories_tags || []).includes("en:beverages")
+    || /\b(drinks?|boissons?|getränk|bebidas?|juices?|jus|smoothies?|shakes?|sodas?|lemonade|limonade|iced tea|kombucha)\b/i.test(`${p.product_name_en || ""} ${p.product_name || ""}`)
+    || /\d\s*(ml|cl|l)\b/i.test(p.quantity || "");
   const per = drink ? "per 100 ml" : "per 100 g";
   let raw = 7; const good = [], bad = [];
   for (const [k, name, unit, w, food, bev] of NUTRIENTS) {
@@ -424,7 +431,8 @@ function nutritionScore(p) {
   }
   const fibre = val("fiber_100g"), protein = val("proteins_100g");
   if (fibre >= 3) { raw += 2 * Math.min(fibre / 6, 1); good.unshift({ name: "Fibre", info: `${fmt(fibre)} g ${per}`, tag: fibre >= 6 ? "high" : "source" }); }
-  if (!drink && protein >= 6) { raw += 1.5 * Math.min(protein / 20, 1); good.unshift({ name: "Protein", info: `${fmt(protein)} g ${per}`, tag: protein >= 12 ? "high" : "source" }); }
+  const [pSource, pHigh] = drink ? [3, 6] : [6, 12];
+  if (protein >= pSource) { raw += 1.5 * Math.min(protein / (pHigh * 1.6), 1); good.unshift({ name: "Protein", info: `${fmt(protein)} g ${per}`, tag: protein >= pHigh ? "high" : "source" }); }
   bad.sort((a, b) => b.sev - a.sev);
   return { raw: clamp10(raw), good, bad };
 }
@@ -452,7 +460,7 @@ async function lookup(code) {
   status(`Looking up ${code}…`);
   $("out").innerHTML = "";
   try {
-    const fields = "product_name,product_name_en,brands,image_front_small_url,ingredients_text,ingredients_text_en,ingredients,ingredients_analysis_tags,labels_tags,allergens_tags,traces_tags,nutriments,categories_tags";
+    const fields = "product_name,product_name_en,brands,image_front_small_url,ingredients_text,ingredients_text_en,ingredients,ingredients_analysis_tags,labels_tags,allergens_tags,traces_tags,nutriments,categories_tags,quantity";
     const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${fields}`);
     const j = await r.json();
     if (j.status !== 1 || !j.product) {
@@ -489,6 +497,10 @@ function render(code, p) {
   const sub = (name, part) => part ? `${name} <b>${Math.round(part.raw)}</b>/10` : `${name} <b>–</b> no data`;
   const healthHtml = h ? `<div class="section health">
     <h3>Health score</h3>
+    ${!h.ing || !h.nut ? `<div class="warn-box"><b>Partial score.</b> ${!h.ing
+      ? "This product has no ingredient list in the database, so this only uses the nutrition table. Sweeteners, additives and other ingredients can't be checked."
+      : "This product has no nutrition table in the database, so this only uses the ingredient list. Amounts of sugar, fat and salt can't be checked."}
+      <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Add it on Open Food Facts</a>.</div>` : ""}
     <div class="score" data-tone="${h.tone}">
       <div class="num"><b>${h.score}</b><span>/10</span></div>
       <div class="gauge"><div class="label">${esc(h.label)}</div><div class="meter" role="img" aria-label="${h.score} out of 10"><i style="width:${h.score * 10}%"></i></div>
@@ -622,7 +634,7 @@ if (!loadHistory().length) lookup("3017620422003");
 // Home-screen apps on iOS keep showing a cached copy of this page. On launch and whenever the app
 // comes back to the foreground, compare with the live page and switch to it if it's newer.
 // Bump APP_VERSION with every change you deploy.
-const APP_VERSION = "2026-09-30.3";
+const APP_VERSION = "2026-09-30.4";
 async function checkForUpdate() {
   try {
     const live = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
