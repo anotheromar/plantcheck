@@ -101,6 +101,33 @@ input[type=text] { flex: 1; min-width: 0; font: 500 1rem var(--mono); letter-spa
 mark { border-radius: 3px; padding: 0 2px; }
 mark.no { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
 mark.maybe { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+.health { gap: 12px; }
+.score { display: flex; gap: 16px; align-items: center; }
+.score .num { font: 800 2.6rem/1 var(--display); letter-spacing: -0.03em; flex: none; }
+.score .num span { font-size: 1.1rem; color: var(--muted); font-weight: 600; margin-left: 2px; }
+.score .gauge { flex: 1; display: grid; gap: 6px; }
+.score .label { font: 600 1rem var(--display); }
+.meter { height: 8px; border-radius: 999px; background: var(--none-bg); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: inherit; }
+.score[data-tone=good] .num, .score[data-tone=good] .label { color: var(--ok); } .score[data-tone=good] .meter i { background: var(--ok); }
+.score[data-tone=mid] .num, .score[data-tone=mid] .label { color: var(--warn); } .score[data-tone=mid] .meter i { background: var(--warn); }
+.score[data-tone=poor] .num, .score[data-tone=poor] .label { color: var(--bad); } .score[data-tone=poor] .meter i { background: var(--bad); }
+.fold { border: 1px solid var(--line); border-radius: 10px; }
+.fold summary { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; font-weight: 600; list-style: none; }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+.fold[open] summary::before { transform: rotate(90deg); }
+.fold summary span:first-child { flex: 1; }
+.fold summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.fold .count { font: 600 .75rem var(--mono); padding: 2px 8px; border-radius: 999px; }
+.fold.good .count { background: var(--ok-bg); color: var(--ok); }
+.fold.bad .count { background: var(--bad-bg); color: var(--bad); }
+.fold-body { padding: 0 12px 12px; display: grid; gap: 6px; }
+.fold h4 { margin: 4px 0 0; font: 500 .68rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.score .parts { font-size: .82rem; color: var(--muted); }
+.score .parts b { color: var(--ink); font-weight: 600; }
+.fold .pill { min-width: 3.4em; text-align: center; }
+.fold .none { color: var(--muted); margin: 0; }
 .note { font-size: .82rem; color: var(--muted); }
 .note a { color: var(--accent); }
 
@@ -282,6 +309,137 @@ function highlight(text, kw) {
   return html;
 }
 
+// ---------- Health rules ----------
+// [kind, pattern, reason, weight]. First match wins, so specific phrases sit above the general
+// ones they'd otherwise hit (e.g. "juice concentrate" before "fruit", "wholemeal flour" before "flour").
+// Patterns run against the lowercased taxonomy name (English) plus the label text.
+const HEALTH_RULES = [
+  ["bad", /\bhydrogenated\b|\bgehärtet|\bhydrogéné/, "hydrogenated fat, a source of trans fat", 3],
+  ["bad", /\bjuice concentrate\b|\bconcentrated \w+ juice\b|\bsyrup\b|\bsirop\b|\bsirup\b|\bjarabe\b|\bmolasses\b|\bmalt extract\b|\bbarley malt\b/, "added sugar", 2],
+  ["bad", /\b(cane |brown |raw |icing |invert |coconut |fruit )?sugars?\b|\bsucrose\b|\bglucose\b|\bfructose\b|\bdextrose\b|\bmaltodextrin\b|\bsucre\b|\bzucker\b|\bazúcar\b|\bzucchero\b|\bsuiker\b|\bhoney\b/, "added sugar", 2],
+  ["bad", /\bpalm\b|\bpalme\b|\bpalmöl|\bpalmfett/, "palm oil, high in saturated fat", 2],
+  ["bad", /\bcoconut (oil|fat)\b|\bshortening\b|\bmargarine\b/, "high in saturated fat", 1],
+  ["bad", /\b(bacon|ham|salami|sausages?|pepperoni|chorizo)\b/, "processed meat", 2],
+  ["bad", /\be25[0-2]\b|\bnitrite|\bnitrate/, "nitrite or nitrate preservative", 2],
+  ["bad", /\b(aspartame|acesulfame|sucralose|saccharin|cyclamate)|\be95[0-5]\b|\be962\b/, "artificial sweetener", 1.5],
+  ["bad", /\be171\b|\btitanium dioxide\b/, "titanium dioxide, banned in EU food since 2022", 1.5],
+  ["bad", /\be1(02|04|10|22|24|29)\b|\b(tartrazine|sunset yellow|allura red|ponceau|azorubine|carmoisine|quinoline yellow)\b/, "synthetic dye", 1],
+  ["bad", /\be150[cd]\b|\bcaramel colou?r\b/, "caramel colouring", 1],
+  ["bad", /\be338\b|\bphosphoric acid\b/, "phosphoric acid", 1],
+  ["bad", /\be21[0-3]\b|\bbenzoate\b|\be32[01]\b|\bbh[at]\b/, "preservative", 1],
+  ["bad", /\be621\b|\bmonosodium glutamate\b|\bmsg\b/, "flavour enhancer", 1],
+  ["bad", /\be407a?\b|\bcarrageenan\b|\be466\b|\bcarboxymethyl|\be43[2-6]\b|\bpolysorbate/, "emulsifier linked to gut irritation", 0.75],
+  ["good", /\bwhole ?(grain|meal|wheat)|\bwholegrain|\bwholemeal|\bwholewheat|\bvollkorn|\bfarine complète|\bintegral/, "whole grain, rich in fibre", 2.5],
+  ["good", /\boats?\b|\boat flakes\b|\bquinoa\b|\bbuckwheat\b|\bmillet\b|\bbarley\b|\brye\b|\bbrown rice\b|\bavoine\b|\bhafer/, "whole grain, rich in fibre", 2],
+  ["good", /(?<!(vanilla|coffee|cocoa) )\bbeans?\b|\b(lentils?|chick ?peas?|peas|soy ?beans?|soya beans?|edamame|tofu|tempeh|pois chiches|lentilles|kichererbsen|linsen)\b/, "legume, protein and fibre", 2],
+  ["good", /\b(almonds?|hazelnuts?|walnuts?|cashews?|peanuts?|pistachios?|pecans?|macadamias?|brazil nuts?|nuts|noisettes?|amandes?|haselnüsse?|mandeln?)\b(?!\s*(oil|öl|huile))/, "nuts, protein and healthy fats", 2],
+  ["good", /\b(chia|flax ?seeds?|linseeds?|pumpkin seeds?|sunflower seeds?|sesame( seeds)?|hemp seeds?)\b(?!\s*oil)/, "seeds, fibre and healthy fats", 2],
+  ["good", /\b(vegetables?|tomato(es)?|carrots?|onions?|garlic|spinach|kale|broccoli|cauliflower|cabbage|peppers|bell pepper|courgettes?|zucchinis?|aubergines?|eggplants?|mushrooms?|beetroot|beets?|sweet potato(es)?|pumpkin|squash|celery|leeks?|lettuce|cucumbers?|légumes|tomates?|gemüse)\b/, "vegetable", 2],
+  ["good", /\bavocados?\b/, "healthy fats and fibre", 2],
+  ["good", /\b(fruits?|apples?|bananas?|strawberr(y|ies)|raspberr(y|ies)|blueberr(y|ies)|berries|cherr(y|ies)|oranges?|lemons?|mangos?|mangoes|pears?|peach(es)?|apricots?|plums?|grapes?|pineapples?|kiwis?|dates|figs|raisins|fraises?)\b|\bpommes?\b(?! de terre)/, "fruit", 1.5],
+  ["good", /\bolive oil\b|\bhuile d'olive\b|\bolivenöl/, "olive oil, heart-healthy fats", 1.5],
+  ["good", /\b(rapeseed|canola|linseed|flaxseed) oil\b|\bcolza\b/, "oil rich in omega-3", 1],
+  ["good", /\b(salmon|sardines?|mackerel|herring|trout)\b/, "oily fish, omega-3", 1.5],
+  ["good", /\b(cocoa|cacao)\b(?!\s*butter)|\bkakao(?!butter)/, "cocoa, rich in antioxidants", 1],
+  ["good", /\b(live|active|bacterial|lactic) cultures?\b|\bprobiotic|\blactic ferments?\b|\bferments lactiques\b|\b(yogh?urt|skyr|kefir)\b/, "fermented, live cultures", 1],
+  ["good", /\b(turmeric|ginger|cinnamon|herbs?|spices?|basil|oregano|rosemary|thyme|parsley|cumin|paprika)\b/, "herbs and spices", 0.5],
+  ["bad", /\bflour\b|\bfarine\b|\bmehl\b|\bharina\b|\bfarina\b/, "refined flour", 1.5],
+  ["bad", /\bstarch\b|\bamidon\b|\bstärke\b|\balmidón\b/, "refined starch", 0.5],
+  ["bad", /\bsalt\b|\bsodium chloride\b|\bsel\b|\bsalz\b|\bsal\b/, "salt", 1],
+  ["bad", /\bflavou?rings?\b|\bflavou?rs?\b|\baromas?\b|\barômes?\b/, "flavouring, a marker of processed food", 0.5],
+  ["bad", /\bcaffeine\b/, "caffeine", 0.5],
+];
+// Estimated share of the product by list position, for when the database gives no percentages.
+const RANK_PCT = [40, 20, 12, 8, 6, 4, 3];
+
+// Split a raw ingredient list on top-level commas, ignoring those inside brackets.
+function splitIngredients(text) {
+  const out = []; let depth = 0, cur = "";
+  for (const c of text || "") {
+    if ("([".includes(c)) depth++;
+    if (")]".includes(c)) depth = Math.max(0, depth - 1);
+    if ((c === "," || c === ";") && !depth) { out.push(cur); cur = ""; } else cur += c;
+  }
+  out.push(cur);
+  return out.map(s => s.replace(/\.$/, "").trim()).filter(Boolean);
+}
+
+// Ingredient score 0–10: start at 5, each healthy ingredient adds and each unhealthy one subtracts its weight,
+// scaled by its share of the product (a trace counts 0.4×, anything ≥50% counts 2×).
+// Healthy points level off towards +5 so a good base can't fully hide sugar or salt;
+// a product with nothing unhealthy gets +1.
+function ingredientScore(p, text) {
+  const nodes = p.ingredients?.length ? p.ingredients : splitIngredients(text).map(t => ({ text: t }));
+  if (!nodes.length) return null;
+  const good = new Map(), bad = new Map();
+  const walk = (list, parentPct) => list.forEach((i, n) => {
+    const known = Number(i.percent ?? i.percent_estimate);
+    const pct = Number.isFinite(known) ? known : parentPct != null ? parentPct / list.length : RANK_PCT[n] ?? 2;
+    const hay = `${tag(i.id || "")} ${i.text || ""}`.toLowerCase();
+    const rule = HEALTH_RULES.find(r => r[1].test(hay));
+    // A matched parent ("vegetable oil (palm, rapeseed)") is scored whole; otherwise look inside it.
+    if (!rule) { if (i.ingredients) walk(i.ingredients, pct); return; }
+    const [kind, , why, w] = rule;
+    const pts = w * (0.4 + 1.6 * Math.min(pct, 50) / 50);
+    const name = (i.text || tag(i.id || "")).replace(/_/g, "").trim();
+    const map = kind === "good" ? good : bad, key = name.toLowerCase(), prev = map.get(key);
+    map.set(key, { name, why, pct: (prev?.pct || 0) + pct, pts: (prev?.pts || 0) + pts, est: !Number.isFinite(known) });
+  });
+  walk(nodes);
+  const sum = m => [...m.values()].reduce((a, x) => a + x.pts, 0);
+  const lift = 5 * (1 - Math.exp(-sum(good) / 3)) + (bad.size ? 0 : 1);
+  const share = x => x.pct < 1 ? "<1%" : `${x.est ? "~" : ""}${Math.round(x.pct)}%`;
+  const items = (m, sign) => [...m.values()].sort((a, b) => b.pts - a.pts)
+    .map(x => ({ name: x.name, info: `${x.why} · ${share(x)}`, tag: sign + x.pts.toFixed(1) }));
+  return { raw: clamp10(5 + lift - sum(bad)), good: items(good, "+"), bad: items(bad, "−") };
+}
+
+// UK front-of-pack traffic-light limits per 100 g, and the stricter ones for drinks per 100 ml:
+// [key, name, unit, weight, food [low ≤, high >], drink [low ≤, high >]]. Calorie limits are our own.
+const NUTRIENTS = [
+  ["sugars_100g", "Sugar", "g", 4, [5, 22.5], [2.5, 11.25]],
+  ["saturated-fat_100g", "Saturated fat", "g", 2.5, [1.5, 5], [0.75, 2.5]],
+  ["salt_100g", "Salt", "g", 2.5, [0.3, 1.5], [0.3, 0.75]],
+  ["fat_100g", "Fat", "g", 1, [3, 17.5], [1.5, 8.75]],
+  ["energy-kcal_100g", "Calories", "kcal", 1.5, [150, 400], [20, 80]],
+];
+const clamp10 = x => Math.max(0, Math.min(10, x));
+const fmt = v => v >= 10 ? Math.round(v) : +v.toFixed(1);
+
+// Nutrition score 0–10: start at 7. Anything above the "low" limit costs up to 1.5× its weight
+// as it passes the "high" limit; fibre and protein add up to +2 and +1.5.
+function nutritionScore(p) {
+  const n = p.nutriments || {};
+  const val = k => n[k] == null || n[k] === "" || !Number.isFinite(Number(n[k])) ? null : Number(n[k]);
+  if (["sugars_100g", "fat_100g", "salt_100g"].every(k => val(k) == null)) return null;
+  const drink = (p.categories_tags || []).includes("en:beverages");
+  const per = drink ? "per 100 ml" : "per 100 g";
+  let raw = 7; const good = [], bad = [];
+  for (const [k, name, unit, w, food, bev] of NUTRIENTS) {
+    const v = val(k); if (v == null) continue;
+    const [lo, hi] = drink ? bev : food, info = `${fmt(v)} ${unit} ${per}`;
+    if (v <= lo) { good.push({ name: `Low in ${name.toLowerCase()}`, info, tag: "low" }); continue; }
+    raw -= w * Math.min((v - lo) / (hi - lo), 1.5);
+    bad.push({ name, info, tag: v > hi ? "high" : "med", sev: (v - lo) / (hi - lo) });
+  }
+  const fibre = val("fiber_100g"), protein = val("proteins_100g");
+  if (fibre >= 3) { raw += 2 * Math.min(fibre / 6, 1); good.unshift({ name: "Fibre", info: `${fmt(fibre)} g ${per}`, tag: fibre >= 6 ? "high" : "source" }); }
+  if (!drink && protein >= 6) { raw += 1.5 * Math.min(protein / 20, 1); good.unshift({ name: "Protein", info: `${fmt(protein)} g ${per}`, tag: protein >= 12 ? "high" : "source" }); }
+  bad.sort((a, b) => b.sev - a.sev);
+  return { raw: clamp10(raw), good, bad };
+}
+
+// Overall score: the average of the ingredient and nutrition scores, or whichever one exists.
+function healthScore(p, text) {
+  const ing = ingredientScore(p, text), nut = nutritionScore(p);
+  const parts = [ing, nut].filter(Boolean);
+  if (!parts.length) return null;
+  const score = Math.round(parts.reduce((a, x) => a + x.raw, 0) / parts.length);
+  const label = score >= 8 ? "Very healthy" : score >= 6 ? "Healthy" : score >= 4 ? "So-so" : score >= 2 ? "Not very healthy" : "Unhealthy";
+  const tone = score >= 7 ? "good" : score >= 4 ? "mid" : "poor";
+  return { score, label, tone, ing, nut };
+}
+
 // ---------- UI ----------
 const $ = id => document.getElementById(id);
 const status = msg => { $("status").textContent = msg || ""; };
@@ -294,7 +452,7 @@ async function lookup(code) {
   status(`Looking up ${code}…`);
   $("out").innerHTML = "";
   try {
-    const fields = "product_name,product_name_en,brands,image_front_small_url,ingredients_text,ingredients_text_en,ingredients,ingredients_analysis_tags,labels_tags,allergens_tags,traces_tags";
+    const fields = "product_name,product_name_en,brands,image_front_small_url,ingredients_text,ingredients_text_en,ingredients,ingredients_analysis_tags,labels_tags,allergens_tags,traces_tags,nutriments,categories_tags";
     const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${fields}`);
     const j = await r.json();
     if (j.status !== 1 || !j.product) {
@@ -317,13 +475,37 @@ function render(code, p) {
     ...a.no.map(x => `<li><span class="pill no">animal</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
     ...a.maybe.map(x => `<li><span class="pill maybe">check</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
   ].join("");
+  const h = healthScore(p, a.text);
+  const li = (x, cls) => `<li><span class="pill ${x.tag === "med" ? "maybe" : cls}">${esc(x.tag)}</span><span>${esc(x.name)} <small>${esc(x.info)}</small></span></li>`;
+  const fold = (title, cls, key) => {
+    const groups = [["Nutrition", h.nut?.[key] || []], ["Ingredients", h.ing?.[key] || []]].filter(g => g[1].length);
+    const total = groups.reduce((a, g) => a + g[1].length, 0);
+    return `<details class="fold ${cls}">
+    <summary><span>${title}</span><span class="count">${total}</span></summary>
+    <div class="fold-body">${total ? groups.map(([g, items]) => `<h4>${g}</h4><ul class="flags">${items.map(x => li(x, cls === "good" ? "yes" : "no")).join("")}</ul>`).join("")
+      : `<p class="none">None found.</p>`}</div>
+  </details>`;
+  };
+  const sub = (name, part) => part ? `${name} <b>${Math.round(part.raw)}</b>/10` : `${name} <b>–</b> no data`;
+  const healthHtml = h ? `<div class="section health">
+    <h3>Health score</h3>
+    <div class="score" data-tone="${h.tone}">
+      <div class="num"><b>${h.score}</b><span>/10</span></div>
+      <div class="gauge"><div class="label">${esc(h.label)}</div><div class="meter" role="img" aria-label="${h.score} out of 10"><i style="width:${h.score * 10}%"></i></div>
+        <div class="parts">${sub("Ingredients", h.ing)} · ${sub("Nutrition", h.nut)}</div></div>
+    </div>
+    ${fold("Healthy", "good", "good")}
+    ${fold("Unhealthy", "bad", "bad")}
+    <div class="note">The average of two scores. <b>Ingredients</b> starts at 5 and each ingredient moves it up or down by how much of the product it makes up. <b>Nutrition</b> starts at 7 and uses the UK traffic-light limits for sugar, saturated fat, salt and fat (stricter for drinks), plus calories; fibre and protein add points.</div>
+  </div>` : "";
   $("out").innerHTML = `<article class="result">
     <div class="verdict" data-v="${a.v}"><div class="big">${esc(a.big)}</div><div class="why">${esc(a.why)}</div></div>
     <div class="product">
       ${p.image_front_small_url ? `<img src="${esc(p.image_front_small_url)}" alt="">` : ""}
       <div><h2>${esc(name)}</h2><div class="meta">${esc(p.brands || "")}</div><div class="code">${esc(code)}</div></div>
     </div>
-    ${flags ? `<div class="section"><h3>Flagged ingredients</h3><ul class="flags">${flags}</ul></div>` : ""}
+    ${healthHtml}
+    ${flags ?`<div class="section"><h3>Flagged ingredients</h3><ul class="flags">${flags}</ul></div>` : ""}
     ${a.veganLabel ? `<div class="section"><h3>Label</h3><ul class="flags"><li><span class="pill yes">vegan</span><span>The pack carries a vegan label.</span></li></ul></div>` : ""}
     ${a.text ? `<div class="section"><h3>Ingredients</h3><div class="ingredients">${highlight(a.text, a.kw)}</div></div>` : ""}
     ${a.traces.length ? `<div class="section"><div class="note">May contain traces of ${esc(a.traces.join(", "))}. Cross-contamination warnings don't make a product non-vegan, but matter for allergies.</div></div>` : ""}
