@@ -618,6 +618,21 @@ $("fileIn").addEventListener("change", async e => {
 
 drawHistory();
 if (!loadHistory().length) lookup("3017620422003");
+
+// Home-screen apps on iOS keep showing a cached copy of this page. On launch and whenever the app
+// comes back to the foreground, compare with the live page and switch to it if it's newer.
+// Bump APP_VERSION with every change you deploy.
+const APP_VERSION = "2026-09-30.3";
+async function checkForUpdate() {
+  try {
+    const live = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
+    const v = live.match(/const APP_VERSION = "([^"]+)"/)?.[1];
+    // A new URL can't be served from the old cache entry.
+    if (v && v !== APP_VERSION) location.replace(`./?v=${encodeURIComponent(v)}`);
+  } catch {}
+}
+checkForUpdate();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
 </script>
 </body>
 </html>
