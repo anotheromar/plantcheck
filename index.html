@@ -42,6 +42,7 @@
   --none: #9aa79b; --none-bg: #242b25; color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
 .wrap { max-width: 560px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -133,6 +134,20 @@ mark.maybe { background: var(--warn-bg); color: var(--warn); font-weight: 600; }
 .fold .none { color: var(--muted); margin: 0; }
 .note { font-size: .82rem; color: var(--muted); }
 .note a { color: var(--accent); }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: .88rem; }
+.warn-box .actions { margin-top: 6px; }
+
+.list-btn { width: 100%; }
+.listcheck { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 10px; }
+.listcheck h3 { margin: 0; font: 500 .72rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.listcheck p { margin: 0; font-size: .88rem; }
+.steps { margin: 0; padding-left: 1.3em; font-size: .9rem; display: grid; gap: 2px; }
+#listForm { display: grid; gap: 10px; }
+textarea { width: 100%; min-height: 8.5em; resize: vertical; font: 400 1rem/1.45 var(--body); padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; gap: 10px; align-items: center; font-size: .92rem; cursor: pointer; }
+.check input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); flex: none; }
 
 .history h3 { margin: 0 0 8px; font: 500 .72rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .history ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
@@ -175,6 +190,25 @@ footer { font-size: .78rem; color: var(--muted); }
       <button type="button" data-code="7394376616037">Oatly iKaffe</button>
       <button type="button" data-code="5449000000996">Coca-Cola</button>
     </div>
+    <button type="button" class="list-btn" id="listBtn">No barcode? Check an ingredient list</button>
+  </section>
+
+  <section class="listcheck" id="listPanel" aria-labelledby="listTitle" hidden>
+    <h3 id="listTitle">Ingredient list</h3>
+    <p id="listFor" hidden></p>
+    <ol class="steps">
+      <li>Tap the box below, then tap it once more.</li>
+      <li>Choose <b>AutoFill → Scan Text</b> (on older iPhones just <b>Scan Text</b>).</li>
+      <li>Point at the ingredients and tap <b>Insert</b>. If they're printed in several languages, select just one.</li>
+    </ol>
+    <form id="listForm">
+      <textarea id="listIn" rows="6" aria-label="Ingredient list" placeholder="You can also paste or type it, e.g. water, soybeans, wheat, salt" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+      <label class="check"><input type="checkbox" id="veganIn"> The pack has a vegan label</label>
+      <div class="row">
+        <button type="submit" class="primary" id="listGo">Check ingredients</button>
+        <button type="button" id="listCancel">Cancel</button>
+      </div>
+    </form>
   </section>
 
   <div class="status" id="status" role="status" aria-live="polite"></div>
@@ -223,6 +257,16 @@ const MAYBE = [
   ["e635", "ribonucleotides, can be animal-derived"], ["glycerol", "can be animal fat"], ["glycerin", "can be animal fat"], ["e422", "glycerol, can be animal fat"],
   ["stearic acid", "can be animal fat"], ["e570", "stearic acid, can be animal fat"], ["e631", "can be from fish"],
 ];
+// German glues words together ("Magermilchpulver", "Vollei", "Rindergelatine"), so these stems also
+// match inside words, with plant-based exceptions like "Kokosmilch", "Kakaobutter" and "Milchsäure".
+const DE_COMPOUNDS = [
+  [/(?<!kokos|hafer|soja|mandel|reis|nuss|cashew|dinkel|erbsen)milch(?!säure)|molke|rahm|sahne|käse|quark|jogh?urt/i, "dairy (DE)"],
+  [/(?<!kakao|erdnuss|shea|mandel|nuss|cashew|sesam|kokos)butter(?!bohne)/i, "dairy (DE)"],
+  [/vollei|eigelb|eidotter|eiklar|eipulver|hühnerei|eier/i, "egg (DE)"],
+  [/gelatine|honig|schmalz|talg/i, "animal-derived (DE)"],
+  [/(?<!frucht|kokos)fleisch(?!tomate)|speck|schinken|hühner|rinder|schweine/i, "meat (DE)"],
+  [/fisch|sardelle|garnele|krabbe|lachs/i, "fish (DE)"],
+];
 // Plant-based phrases that contain a non-vegan word; stripped before matching.
 const SAFE_PHRASES = /\b(cocoa|cacao|peanut|shea|nut|almond|cashew|hazelnut|coconut|oat|soy|soya|rice|plant|vegetable|seed|apple|mango|sunflower|kokos|hafer|coco|avena|beurre de cacao|pâte de cacao)[\s-]+(butter|milk|cream|drink|milch|lait|leche|beurre|crème)\b|\bcream of tartar\b|\bbutter ?beans?\b|\bbutternut\b|\bmilk thistle\b|\beggplant\b|\bbeurre de cacao\b|\bkakaobutter\b|\bmanteca de cacao\b|\bburro di cacao\b|\bbeurre de karité\b|\blait de coco\b|\blait d'avoine\b|\blatte di (cocco|soia|mandorla)\b|\bleche de (coco|soja|avena)\b|\bsans lait\b|\bmilk[- ]free\b|\bdairy[- ]free\b|\begg[- ]free\b|\bno milk\b/gi;
 
@@ -231,6 +275,7 @@ const MAYBE_NOTES = {
   "en:natural-flavouring": "source not stated", "en:flavouring": "source not stated",
   "en:e471": "can be animal fat", "en:e322": "usually soy, rarely egg", "en:e322i": "usually soy, rarely egg",
   "en:vitamin-d": "D3 is usually from lanolin", "en:e920": "sometimes from feathers",
+  "en:alcohol": "plant-based, but drinks like wine can be clarified with animal products",
 };
 const ANIMAL_ALLERGENS = { "en:milk": "milk", "en:eggs": "egg", "en:fish": "fish", "en:crustaceans": "crustaceans", "en:molluscs": "molluscs" };
 
@@ -248,7 +293,10 @@ function scanText(text) {
   const hits = { no: new Map(), maybe: new Map() };
   for (const [t, why] of NON_VEGAN) if (termRe(t).test(cleaned)) hits.no.set(t, why);
   for (const [t, why] of MAYBE) if (termRe(t).test(cleaned)) hits.maybe.set(t, why);
-  // E-numbers written like "E 120" or "E-120"
+  for (const w of new Set(cleaned.match(/\p{L}{4,}/gu) || [])) {
+    const hit = DE_COMPOUNDS.find(([re]) => re.test(w));
+    if (hit && ![...hits.no.keys()].some(k => k.toLowerCase() === w.toLowerCase())) hits.no.set(w, hit[1]);
+  }
   return hits;
 }
 
@@ -280,7 +328,7 @@ function analyse(p) {
   let v, big, why;
   if (!text && !ingr.length && !veganLabel) {
     v = "unknown"; big = "No ingredient list";
-    why = "This product is in the database, but nobody has added its ingredients yet.";
+    why = "This product is in the database, but nobody has added its ingredients yet. You can scan them from the pack below.";
   } else if (no.size || nonVeganLabel || analysis.includes("en:non-vegan")) {
     v = "nonvegan"; big = "Not vegan";
     why = no.size ? `Contains ${[...no.values()].slice(0, 3).map(x => x.name.toLowerCase()).join(", ")}${no.size > 3 ? " and more" : ""}.` : "Open Food Facts marks at least one ingredient as animal-derived.";
@@ -295,14 +343,20 @@ function analyse(p) {
     why = "Every ingredient is plant-based or mineral.";
   } else {
     v = "maybe"; big = "Likely vegan";
-    why = "Nothing animal-derived found, but some ingredients weren't recognised by the database.";
+    why = p.scanned
+      ? "Nothing animal-derived found in your list, but some words weren't recognised. Check those, or look for a vegan label."
+      : "Nothing animal-derived found, but some ingredients weren't recognised by the database.";
   }
   return { v, big, why, no: [...no.values()], maybe: v === "vegan" && veganLabel ? [] : [...maybe.values()], traces, veganLabel, text, kw };
 }
 
-function highlight(text, kw) {
+// extra: [term, "no" | "maybe"] pairs, e.g. ingredients the database flagged that the keyword scan missed.
+function highlight(text, kw, extra = []) {
   let html = esc(text);
-  const marks = [...[...kw.no.keys()].map(t => [t, "no"]), ...[...kw.maybe.keys()].map(t => [t, "maybe"])].sort((a, b) => b[0].length - a[0].length);
+  const byTerm = new Map();
+  for (const [t, cls] of [...[...kw.no.keys()].map(t => [t, "no"]), ...extra.filter(x => x[1] === "no"), ...[...kw.maybe.keys()].map(t => [t, "maybe"]), ...extra])
+    if (t && !byTerm.has(t.toLowerCase())) byTerm.set(t.toLowerCase(), [t, cls]);
+  const marks = [...byTerm.values()].sort((a, b) => b[0].length - a[0].length);
   // Mark on the escaped text, skipping inside existing tags.
   for (const [t, cls] of marks) {
     const re = termRe(esc(t));
@@ -318,9 +372,9 @@ function highlight(text, kw) {
 // Patterns run against the lowercased taxonomy name (English) plus the label text.
 const HEALTH_RULES = [
   ["bad", /\bhydrogenated\b|\bgehärtet|\bhydrogéné/, "hydrogenated fat, a source of trans fat", 3],
-  ["bad", /\bjuice concentrate\b|\bconcentrated \w+ juice\b|\bsyrup\b|\bsirop\b|\bsirup\b|\bjarabe\b|\bmolasses\b|\bmalt extract\b|\bbarley malt\b/, "added sugar", 2],
-  ["bad", /\b(cane |brown |raw |icing |invert |coconut |fruit )?sugars?\b|\bsucrose\b|\bglucose\b|\bfructose\b|\bdextrose\b|\bmaltodextrin\b|\bsucre\b|\bzucker\b|\bazúcar\b|\bzucchero\b|\bsuiker\b|\bhoney\b/, "added sugar", 2],
-  ["bad", /\bpalm\b|\bpalme\b|\bpalmöl|\bpalmfett/, "palm oil, high in saturated fat", 2],
+  ["bad", /\bjuice concentrate\b|\bconcentrated \w+ juice\b|\bsyrup\b|\bsirop\b|sirup\b|\bjarabe\b|\bmolasses\b|\bmalt extract\b|\bbarley malt\b|saftkonzentrat/, "added sugar", 2],
+  ["bad", /\b(cane |brown |raw |icing |invert |coconut |fruit )?sugars?\b|\bsucrose\b|\bglucose\b|\bfructose\b|\bdextrose\b|\bmaltodextrin\b|\bsucre\b|zucker\b|\bazúcar\b|\bzucchero\b|\bsuiker\b|\bhoney\b/, "added sugar", 2],
+  ["bad", /\bpalm\b|\bpalme\b|palm(kern)?(öl|fett)/, "palm oil, high in saturated fat", 2],
   ["bad", /\bcoconut (oil|fat)\b|\bshortening\b|\bmargarine\b/, "high in saturated fat", 1],
   ["bad", /\b(bacon|ham|salami|sausages?|pepperoni|chorizo)\b/, "processed meat", 2],
   ["bad", /\be25[0-2]\b|\bnitrite|\bnitrate/, "nitrite or nitrate preservative", 2],
@@ -333,7 +387,7 @@ const HEALTH_RULES = [
   ["bad", /\be21[0-3]\b|\bbenzoate\b|\be32[01]\b|\bbh[at]\b/, "preservative", 1],
   ["bad", /\be621\b|\bmonosodium glutamate\b|\bmsg\b/, "flavour enhancer", 1],
   ["bad", /\be407a?\b|\bcarrageenan\b|\be466\b|\bcarboxymethyl|\be43[2-6]\b|\bpolysorbate/, "emulsifier linked to gut irritation", 0.75],
-  ["good", /\bwhole ?(grain|meal|wheat)|\bwholegrain|\bwholemeal|\bwholewheat|\bvollkorn|\bfarine complète|\bintegral/, "whole grain, rich in fibre", 2.5],
+  ["good", /\bwhole ?(grain|meal|wheat)|\bwholegrain|\bwholemeal|\bwholewheat|vollkorn|\bfarine complète|\bintegral/, "whole grain, rich in fibre", 2.5],
   ["good", /\boats?\b|\boat flakes\b|\bquinoa\b|\bbuckwheat\b|\bmillet\b|\bbarley\b|\brye\b|\bbrown rice\b|\bavoine\b|\bhafer/, "whole grain, rich in fibre", 2],
   ["good", /(?<!(vanilla|coffee|cocoa) )\bbeans?\b|\b(lentils?|chick ?peas?|peas|soy ?beans?|soya beans?|edamame|tofu|tempeh|pois chiches|lentilles|kichererbsen|linsen)\b/, "legume, protein and fibre", 2],
   ["good", /\b(almonds?|hazelnuts?|walnuts?|cashews?|peanuts?|pistachios?|pecans?|macadamias?|brazil nuts?|nuts|noisettes?|amandes?|haselnüsse?|mandeln?)\b(?!\s*(oil|öl|huile))/, "nuts, protein and healthy fats", 2],
@@ -347,33 +401,39 @@ const HEALTH_RULES = [
   ["good", /\b(cocoa|cacao)\b(?!\s*butter)|\bkakao(?!butter)/, "cocoa, rich in antioxidants", 1],
   ["good", /\b(live|active|bacterial|lactic) cultures?\b|\bprobiotic|\blactic ferments?\b|\bferments lactiques\b|\b(yogh?urt|skyr|kefir)\b/, "fermented, live cultures", 1],
   ["good", /\b(turmeric|ginger|cinnamon|herbs?|spices?|basil|oregano|rosemary|thyme|parsley|cumin|paprika)\b/, "herbs and spices", 0.5],
-  ["bad", /\bflour\b|\bfarine\b|\bmehl\b|\bharina\b|\bfarina\b/, "refined flour", 1.5],
-  ["bad", /\bstarch\b|\bamidon\b|\bstärke\b|\balmidón\b/, "refined starch", 0.5],
-  ["bad", /\bsalt\b|\bsodium chloride\b|\bsel\b|\bsalz\b|\bsal\b/, "salt", 1],
+  ["bad", /\bflour\b|\bfarine\b|mehl\b|\bharina\b|\bfarina\b/, "refined flour", 1.5],
+  ["bad", /\bstarch\b|\bamidon\b|stärke\b|\balmidón\b/, "refined starch", 0.5],
+  ["bad", /\bsalt\b|\bsodium chloride\b|\bsel\b|salz\b|\bsal\b/, "salt", 1],
   ["bad", /\bflavou?rings?\b|\bflavou?rs?\b|\baromas?\b|\barômes?\b/, "flavouring, a marker of processed food", 0.5],
   ["bad", /\bcaffeine\b/, "caffeine", 0.5],
 ];
 // Estimated share of the product by list position, for when the database gives no percentages.
 const RANK_PCT = [40, 20, 12, 8, 6, 4, 3];
 
-// Split a raw ingredient list on top-level commas, ignoring those inside brackets.
+// Split a raw ingredient list on top-level commas, ignoring those inside brackets
+// and decimal commas ("Haselnüsse 13,5%").
 function splitIngredients(text) {
   const out = []; let depth = 0, cur = "";
-  for (const c of text || "") {
+  const s = text || "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
     if ("([".includes(c)) depth++;
     if (")]".includes(c)) depth = Math.max(0, depth - 1);
-    if ((c === "," || c === ";") && !depth) { out.push(cur); cur = ""; } else cur += c;
+    const decimal = c === "," && /\d/.test(s[i - 1] || "") && /\d/.test(s[i + 1] || "");
+    if ((c === "," || c === ";") && !depth && !decimal) { out.push(cur); cur = ""; } else cur += c;
   }
   out.push(cur);
   return out.map(s => s.replace(/\.$/, "").trim()).filter(Boolean);
 }
+// A percentage printed next to an ingredient, e.g. "cocoa 7,4%".
+const pctOf = t => { const m = t.match(/(\d+(?:[.,]\d+)?)\s*%/); return m ? parseFloat(m[1].replace(",", ".")) : undefined; };
 
 // Ingredient score 0–10: start at 5, each healthy ingredient adds and each unhealthy one subtracts its weight,
 // scaled by its share of the product (a trace counts 0.4×, anything ≥50% counts 2×).
 // Healthy points level off towards +5 so a good base can't fully hide sugar or salt;
 // a product with nothing unhealthy gets +1.
 function ingredientScore(p, text) {
-  const nodes = p.ingredients?.length ? p.ingredients : splitIngredients(text).map(t => ({ text: t }));
+  const nodes = p.ingredients?.length ? p.ingredients : splitIngredients(text).map(t => ({ text: t, percent: pctOf(t) }));
   if (!nodes.length) return null;
   const good = new Map(), bad = new Map();
   const walk = (list, parentPct) => list.forEach((i, n) => {
@@ -448,6 +508,95 @@ function healthScore(p, text) {
   return { score, label, tone, ing, nut };
 }
 
+// ---------- Scanned ingredient lists ----------
+// Text from iPhone Scan Text (or pasted) arrives with line breaks, a heading, often the same list in
+// several languages, and sometimes the nutrition table or a "may contain" line. Reduce it to one list.
+const LIST_HEAD = /\b(ingredients?|zutaten|ingr[ée]dients?|ingredienti|ingredientes|ingredi[ëe]nten)\s*:/giu;
+const headLang = w => /^zutaten/i.test(w) ? "de" : /^ingrédient/i.test(w) ? "fr" : /^ingredienti/i.test(w) ? "it"
+  : /^ingredientes/i.test(w) ? "es" : /^ingredi[ëe]nten/i.test(w) ? "nl" : "en";
+const LANG_PREF = ["en", "de", "fr", "it", "es", "nl"];
+const LANG_NAMES = { en: "English", de: "German", fr: "French", it: "Italian", es: "Spanish", nl: "Dutch" };
+// Common label words per language, for lists scanned without their heading.
+const LANG_HINTS = {
+  en: /\b(and|water|sugar|salt|flour|milk|oil|flavou?rings?|powder|emulsifier|acid)\b/gi,
+  de: /\b(und|wasser|milch|aroma|emulgator|säuerungsmittel|pulver)\b|zucker|salz|mehl|stärke|öl\b/gi,
+  fr: /\b(et|eau|sucre|sel|farine|lait|huile|arômes?|poudre|acidifiant)\b/gi,
+  it: /\b(e|acqua|zucchero|sale|farina|latte|olio|aromi|polvere|emulsionante)\b/gi,
+  es: /\b(y|agua|azúcar|sal|harina|leche|aceite|polvo|emulgente)\b/gi,
+  nl: /\b(en|suiker|zout|bloem|melk|olie|poeder)\b/gi,
+};
+// Where the ingredient list ends: nutrition table, storage and origin notes.
+const LIST_END = /(?<!\p{L})(n[äa]e?hrwert|nutrition(?!\p{L})|nutritional (values|information)|valeurs? nutritives?|d[ée]claration nutritionnelle|valori nutrizionali|informaci[óo]n nutricional|voedingswaarde|aufbewahr|k[üu]hl und trocken|lagern|keep (refrigerated|cool|dry)|store (in|at)|[àa] conserver|conservare|mindestens haltbar|best before|[àa] consommer|da consumarsi|hergestellt|produced (in|by)|made in|fabriqu[ée])/iu;
+// "May contain traces of milk": about cross-contamination, so it mustn't count as an ingredient.
+const TRACES = /(?<!\p{L})(may contain|can contain|kann(?!\p{L})[^.;]*?enthalten|peut contenir|può contenere|puede contener|kan(?!\p{L})[^.;]*?bevatten|traces?(?!\p{L})|spuren(?!\p{L})|tracce(?!\p{L})|trazas(?!\p{L})|sporen(?!\p{L}))[^.;]*[.;]?/giu;
+
+function guessLang(text) {
+  let best = "en", top = 0;
+  for (const [lc, re] of Object.entries(LANG_HINTS)) {
+    const n = (text.match(re) || []).length;
+    if (n > top) { best = lc; top = n; }
+  }
+  return best;
+}
+
+function prepareList(raw) {
+  let text = String(raw || "").replace(/\r/g, "")
+    .replace(/(\p{L})[-‐‑]\s*\n\s*(\p{Ll})/gu, "$1$2") // re-join words hyphenated across lines
+    .replace(/\s*\n\s*/g, " ");
+  let lang = null, langs = 1;
+  const heads = [...text.matchAll(LIST_HEAD)];
+  if (heads.length) {
+    const blocks = heads.map((m, i) => ({ lang: headLang(m[1]), text: text.slice(m.index + m[0].length, heads[i + 1]?.index ?? text.length) }));
+    const pick = LANG_PREF.map(l => blocks.find(b => b.lang === l)).find(Boolean);
+    langs = new Set(blocks.map(b => b.lang)).size;
+    text = pick.text; lang = pick.lang;
+  }
+  const end = text.search(LIST_END);
+  if (end > 0) text = text.slice(0, end);
+  const traces = [];
+  text = text.replace(TRACES, m => { traces.push(m.trim()); return " "; })
+    .replace(/(?<!\p{L})[Ee] ?[-‐]? ?(\d{3,4}[a-f]?)(?!\d)/gu, "E$1") // "E 471" → "E471"
+    .replace(/\s+([,.;)])/g, "$1").replace(/\s{2,}/g, " ")
+    .replace(/^[\s,.;:]+|[\s,;:]+$/g, "");
+  return { text, traces, lang: lang || guessLang(text), langs, at: Date.now() };
+}
+
+// Open Food Facts analyses a product without saving it when the barcode is "test", which turns a list
+// in any language into its ingredient taxonomy, with vegan flags and percentage estimates.
+// Returns null when offline, slow (weak signal in a shop) or when nothing was recognised;
+// the app then falls back to its word lists.
+async function parseList(text, lang) {
+  const slim = list => list.map(i => ({ id: i.id, text: i.text, vegan: i.vegan, percent: i.percent, percent_estimate: i.percent_estimate, ...(i.ingredients ? { ingredients: slim(i.ingredients) } : {}) }));
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const r = await fetch("https://world.openfoodfacts.org/api/v3/product/test", {
+      method: "PATCH", signal: ctl.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: "ingredients,ingredients_analysis_tags,allergens_tags", product: { lang, [`ingredients_text_${lang}`]: text } }),
+    });
+    const p = (await r.json()).product;
+    if (!p?.ingredients?.length) return null;
+    return { ingredients: slim(p.ingredients), ingredients_analysis_tags: p.ingredients_analysis_tags || [], allergens_tags: p.allergens_tags || [] };
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
+// The product as the app should judge it: the scanned list replaces the database's ingredient data,
+// while name, picture and nutrition table stay. The checkbox decides the vegan label.
+function withScannedList(base, scan) {
+  const { ingredients, ingredients_text, ingredients_text_en, ingredients_analysis_tags, allergens_tags, traces_tags, labels_tags = [], ...rest } = base;
+  const labels = labels_tags.filter(l => l !== "en:vegan" && l !== "en:non-vegan");
+  return { ...rest, ...scan.parsed, ingredients_text: scan.text, labels_tags: scan.vegan ? [...labels, "en:vegan"] : labels, scanned: true };
+}
+
+// Lists scanned for a barcode are kept on this device, so the product shows them next time too.
+function loadScans() { try { return JSON.parse(localStorage.getItem("plantcheck-scans") || "{}"); } catch { return {}; } }
+function storeScans(s) { try { localStorage.setItem("plantcheck-scans", JSON.stringify(s)); } catch {} }
+function saveScan(code, scan) {
+  const s = loadScans(); s[code] = scan;
+  storeScans(Object.fromEntries(Object.entries(s).sort((a, b) => b[1].at - a[1].at).slice(0, 40)));
+}
+function dropScan(code) { const s = loadScans(); delete s[code]; storeScans(s); }
+
 // ---------- UI ----------
 const $ = id => document.getElementById(id);
 const status = msg => { $("status").textContent = msg || ""; };
@@ -457,6 +606,7 @@ async function lookup(code) {
   code = String(code).replace(/\D/g, "");
   if (code.length < 6) { status("That doesn't look like a barcode. Barcodes on food are usually 8 or 13 digits."); return; }
   $("codeIn").value = code;
+  closeList();
   status(`Looking up ${code}…`);
   $("out").innerHTML = "";
   try {
@@ -464,21 +614,27 @@ async function lookup(code) {
     const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${fields}`);
     const j = await r.json();
     if (j.status !== 1 || !j.product) {
-      status("");
+      status(""); shown = null;
       $("out").innerHTML = `<article class="result"><div class="verdict" data-v="unknown"><div class="big">Product not found</div>
-        <div class="why">Barcode <span class="code">${esc(code)}</span> isn't in Open Food Facts yet. You can <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">add it there</a> and scan again.</div></div></article>`;
+        <div class="why">Barcode <span class="code">${esc(code)}</span> isn't in Open Food Facts yet. You can <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">add it there</a> and scan again.</div>
+        <div class="actions"><button type="button" class="link" data-act="scan-new">Check its ingredient list instead</button></div></div></article>`;
       return;
     }
     status("");
-    render(code, j.product);
+    render(code, j.product, loadScans()[code]);
   } catch (e) {
     status("Couldn't reach Open Food Facts. Check your connection and try again.");
   }
 }
 
-function render(code, p) {
+let shown = null; // what's on screen: { code, base, scan }, for the scan buttons in the result
+
+// base: the database product ({} for a list scanned on its own); scan: a list scanned from the pack.
+function render(code, base, scan) {
+  shown = { code, base, scan };
+  const p = scan ? withScannedList(base, scan) : base;
   const a = analyse(p);
-  const name = p.product_name_en || p.product_name || "Unnamed product";
+  const name = p.product_name_en || p.product_name || (code ? "Unnamed product" : "Your ingredient list");
   const flags = [
     ...a.no.map(x => `<li><span class="pill no">animal</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
     ...a.maybe.map(x => `<li><span class="pill maybe">check</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
@@ -495,12 +651,17 @@ function render(code, p) {
   </details>`;
   };
   const sub = (name, part) => part ? `${name} <b>${Math.round(part.raw)}</b>/10` : `${name} <b>–</b> no data`;
+  const scanBtn = label => `<button type="button" class="link" data-act="scan">${label}</button>`;
+  const partial = !h ? "" : !h.ing
+    ? "This product has no ingredient list in the database, so this only uses the nutrition table. Sweeteners, additives and other ingredients can't be checked."
+    : h.nut ? "" : code
+    ? "This product has no nutrition table in the database, so this only uses the ingredient list. Amounts of sugar, fat and salt can't be checked."
+    : "A scanned list has no nutrition table, so this only uses the ingredients. Amounts of sugar, fat and salt can't be checked.";
   const healthHtml = h ? `<div class="section health">
     <h3>Health score</h3>
-    ${!h.ing || !h.nut ? `<div class="warn-box"><b>Partial score.</b> ${!h.ing
-      ? "This product has no ingredient list in the database, so this only uses the nutrition table. Sweeteners, additives and other ingredients can't be checked."
-      : "This product has no nutrition table in the database, so this only uses the ingredient list. Amounts of sugar, fat and salt can't be checked."}
-      <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Add it on Open Food Facts</a>.</div>` : ""}
+    ${partial ? `<div class="warn-box"><b>Partial score.</b> ${partial}
+      ${code ? `<a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Add it on Open Food Facts</a>.` : ""}
+      ${!h.ing ? `<div class="actions">${scanBtn("Scan the list from the pack")}</div>` : ""}</div>` : ""}
     <div class="score" data-tone="${h.tone}">
       <div class="num"><b>${h.score}</b><span>/10</span></div>
       <div class="gauge"><div class="label">${esc(h.label)}</div><div class="meter" role="img" aria-label="${h.score} out of 10"><i style="width:${h.score * 10}%"></i></div>
@@ -510,21 +671,75 @@ function render(code, p) {
     ${fold("Unhealthy", "bad", "bad")}
     <div class="note">The average of two scores. <b>Ingredients</b> starts at 5 and each ingredient moves it up or down by how much of the product it makes up. <b>Nutrition</b> starts at 7 and uses the UK traffic-light limits for sugar, saturated fat, salt and fat (stricter for drinks), plus calories; fibre and protein add points.</div>
   </div>` : "";
+  // Mark what the database flagged too, e.g. German compounds like "Magermilchpulver" the word lists miss.
+  const marks = [...a.no.filter(x => x.why !== "declared allergen").map(x => [x.name, "no"]), ...a.maybe.map(x => [x.name, "maybe"])];
+  const scanNotes = scan ? [
+    scan.langs > 1 ? `The pack lists the ingredients in ${scan.langs} languages; the ${LANG_NAMES[scan.lang]} list was checked.` : "",
+    scan.traces.length ? `Left out of the check: “${scan.traces.join(" ")}” Cross-contamination warnings don't make a product non-vegan, but matter for allergies.` : "",
+    scan.parsed ? "" : "Open Food Facts didn't answer, so this used the app's own word lists, which are less thorough. Edit or scan again to retry.",
+  ].filter(Boolean).map(t => `<div class="note">${esc(t)}</div>`).join("") : "";
+  const ingActions = scan
+    ? scanBtn("Edit or scan again") + (code ? `<button type="button" class="link" data-act="unscan">Use the database list</button>` : "")
+    : (a.text ? "<span>Pack says something different?</span>" : "") + scanBtn("Scan the list from the pack");
   $("out").innerHTML = `<article class="result">
     <div class="verdict" data-v="${a.v}"><div class="big">${esc(a.big)}</div><div class="why">${esc(a.why)}</div></div>
     <div class="product">
       ${p.image_front_small_url ? `<img src="${esc(p.image_front_small_url)}" alt="">` : ""}
-      <div><h2>${esc(name)}</h2><div class="meta">${esc(p.brands || "")}</div><div class="code">${esc(code)}</div></div>
+      <div><h2>${esc(name)}</h2><div class="meta">${esc(p.brands || (code ? "" : "Scanned from the pack"))}</div>${code ? `<div class="code">${esc(code)}</div>` : ""}</div>
     </div>
     ${healthHtml}
-    ${flags ?`<div class="section"><h3>Flagged ingredients</h3><ul class="flags">${flags}</ul></div>` : ""}
+    ${flags ? `<div class="section"><h3>Flagged ingredients</h3><ul class="flags">${flags}</ul></div>` : ""}
     ${a.veganLabel ? `<div class="section"><h3>Label</h3><ul class="flags"><li><span class="pill yes">vegan</span><span>The pack carries a vegan label.</span></li></ul></div>` : ""}
-    ${a.text ? `<div class="section"><h3>Ingredients</h3><div class="ingredients">${highlight(a.text, a.kw)}</div></div>` : ""}
+    <div class="section"><h3>Ingredients${scan ? " · scanned from the pack" : ""}</h3>
+      ${a.text ? `<div class="ingredients">${highlight(a.text, a.kw, marks)}</div>` : `<div class="note">Nobody has added this product's ingredients to the database yet.</div>`}
+      ${scanNotes}
+      <div class="actions">${ingActions}</div>
+    </div>
     ${a.traces.length ? `<div class="section"><div class="note">May contain traces of ${esc(a.traces.join(", "))}. Cross-contamination warnings don't make a product non-vegan, but matter for allergies.</div></div>` : ""}
-    <div class="section"><div class="note">Wrong or missing data? <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Edit this product on Open Food Facts</a>.</div></div>
+    ${code ? `<div class="section"><div class="note">Wrong or missing data? <a href="https://world.openfoodfacts.org/product/${esc(code)}" target="_blank" rel="noopener">Edit this product on Open Food Facts</a>.</div></div>` : ""}
   </article>`;
-  saveHistory({ code, name, v: a.v });
+  if (code) saveHistory({ code, name, v: a.v });
 }
+
+// ---------- Ingredient list panel ----------
+let listTarget = null; // the result a list is scanned for ({ code, base, scan }), or null for a list on its own
+const motion = () => matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+
+function openList(target) {
+  listTarget = target;
+  const forName = target?.code && (target.base.product_name_en || target.base.product_name || "this product");
+  $("listFor").hidden = !forName;
+  $("listFor").textContent = forName ? `For ${forName}: your list replaces the one in the database, and its nutrition table is kept.` : "";
+  $("listIn").value = target?.scan?.text || "";
+  $("veganIn").checked = target?.scan ? target.scan.vegan : (target?.base?.labels_tags || []).includes("en:vegan");
+  $("listPanel").hidden = false;
+  $("listPanel").scrollIntoView({ block: "start", behavior: motion() });
+}
+function closeList() { $("listPanel").hidden = true; listTarget = null; }
+
+$("listBtn").addEventListener("click", () => openList(null));
+$("listCancel").addEventListener("click", closeList);
+$("listForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const scan = prepareList($("listIn").value);
+  if (!scan.text) { status("Scan or paste the ingredient list into the box first."); return; }
+  scan.vegan = $("veganIn").checked;
+  const go = $("listGo"); go.disabled = true; go.textContent = "Checking…";
+  scan.parsed = await parseList(scan.text, scan.lang);
+  go.disabled = false; go.textContent = "Check ingredients";
+  const t = listTarget || { code: null, base: {} };
+  if (t.code) saveScan(t.code, scan);
+  closeList(); status("");
+  render(t.code, t.base, scan);
+  $("out").scrollIntoView({ block: "start", behavior: motion() });
+});
+$("out").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  if (b.dataset.act === "scan") openList(shown);
+  else if (b.dataset.act === "scan-new") openList(null);
+  else if (b.dataset.act === "unscan" && shown) { dropScan(shown.code); render(shown.code, shown.base); }
+});
 
 // History (per-browser convenience only)
 function loadHistory() { try { return JSON.parse(localStorage.getItem("plantcheck-history") || "[]"); } catch { return []; } }
@@ -634,7 +849,7 @@ if (!loadHistory().length) lookup("3017620422003");
 // Home-screen apps on iOS keep showing a cached copy of this page. On launch and whenever the app
 // comes back to the foreground, compare with the live page and switch to it if it's newer.
 // Bump APP_VERSION with every change you deploy.
-const APP_VERSION = "2026-09-30.4";
+const APP_VERSION = "2026-10-06.1";
 async function checkForUpdate() {
   try {
     const live = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
