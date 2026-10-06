@@ -318,12 +318,17 @@ function analyse(p) {
   const kwNo = [...kw.no.keys()];
   for (const [t, why] of kw.no) if (!offFlagged && !kwNo.some(o => o !== t && o.includes(t))) no.set(t, { name: t, why });
   for (const [t, why] of kw.maybe) if (!no.has(t) && ![...maybe.keys()].some(k => k.includes(t))) maybe.set(t, { name: t, why });
-  if (!no.size) for (const a of p.allergens_tags || []) if (ANIMAL_ALLERGENS[a]) {
-    no.set("allergen:" + a, { name: "Contains " + ANIMAL_ALLERGENS[a], why: "declared allergen" });
-  }
   const veganLabel = labels.includes("en:vegan");
   const nonVeganLabel = labels.includes("en:non-vegan");
   const traces = (p.traces_tags || []).filter(t => ANIMAL_ALLERGENS[t]).map(t => ANIMAL_ALLERGENS[t]);
+  // A declared animal allergen is a backup for ingredient lists the database can't fully read. When every
+  // ingredient is plant-based or the pack has a vegan label, the two contradict: one of them is a data
+  // error (e.g. "milk" on a Kikkoman soy sauce), so report it instead of letting it decide.
+  const allergens = (p.allergens_tags || []).filter(a => ANIMAL_ALLERGENS[a]).map(a => ANIMAL_ALLERGENS[a]);
+  const allPlant = analysis.includes("en:vegan");
+  const conflict = !no.size && (allPlant || veganLabel) ? allergens : [];
+  if (!no.size && !conflict.length) for (const name of allergens) no.set("allergen:" + name, { name, why: "declared as an allergen", allergen: true });
+  const list = names => names.slice(0, 3).join(", ") + (names.length > 3 ? " and more" : "");
 
   let v, big, why;
   if (!text && !ingr.length && !veganLabel) {
@@ -331,7 +336,13 @@ function analyse(p) {
     why = "This product is in the database, but nobody has added its ingredients yet. You can scan them from the pack below.";
   } else if (no.size || nonVeganLabel || analysis.includes("en:non-vegan")) {
     v = "nonvegan"; big = "Not vegan";
-    why = no.size ? `Contains ${[...no.values()].slice(0, 3).map(x => x.name.toLowerCase()).join(", ")}${no.size > 3 ? " and more" : ""}.` : "Open Food Facts marks at least one ingredient as animal-derived.";
+    const found = [...no.values()];
+    why = !found.length ? "Open Food Facts marks at least one ingredient as animal-derived."
+      : found.every(x => x.allergen) ? `The database lists ${list(found.map(x => x.name))} as an allergen.`
+      : `Contains ${list(found.map(x => x.name.toLowerCase()))}.`;
+  } else if (conflict.length && !(veganLabel && allPlant)) {
+    v = "maybe"; big = "Check the pack";
+    why = `${allPlant ? "Every ingredient is plant-based" : "The pack has a vegan label"}, but the database also lists ${list(conflict)} as an allergen. One of the two is wrong.`;
   } else if (veganLabel) {
     v = "vegan"; big = "Vegan";
     why = "Carries a vegan label and no animal ingredients were found." + (maybe.size ? " A few ingredients would otherwise be ambiguous; the label covers them." : "");
@@ -347,7 +358,7 @@ function analyse(p) {
       ? "Nothing animal-derived found in your list, but some words weren't recognised. Check those, or look for a vegan label."
       : "Nothing animal-derived found, but some ingredients weren't recognised by the database.";
   }
-  return { v, big, why, no: [...no.values()], maybe: v === "vegan" && veganLabel ? [] : [...maybe.values()], traces, veganLabel, text, kw };
+  return { v, big, why, no: [...no.values()], maybe: v === "vegan" && veganLabel ? [] : [...maybe.values()], conflict, traces, veganLabel, text, kw };
 }
 
 // extra: [term, "no" | "maybe"] pairs, e.g. ingredients the database flagged that the keyword scan missed.
@@ -638,6 +649,7 @@ function render(code, base, scan) {
   const flags = [
     ...a.no.map(x => `<li><span class="pill no">animal</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
     ...a.maybe.map(x => `<li><span class="pill maybe">check</span><span>${esc(x.name)} <small>${esc(x.why)}</small></span></li>`),
+    ...a.conflict.map(x => `<li><span class="pill maybe">check</span><span>${esc(x[0].toUpperCase() + x.slice(1))} <small>listed as an allergen, but no ingredient contains it: probably a database error. Check the pack if you have an allergy.</small></span></li>`),
   ].join("");
   const h = healthScore(p, a.text);
   const li = (x, cls) => `<li><span class="pill ${x.tag === "med" ? "maybe" : cls}">${esc(x.tag)}</span><span>${esc(x.name)} <small>${esc(x.info)}</small></span></li>`;
@@ -672,7 +684,7 @@ function render(code, base, scan) {
     <div class="note">The average of two scores. <b>Ingredients</b> starts at 5 and each ingredient moves it up or down by how much of the product it makes up. <b>Nutrition</b> starts at 7 and uses the UK traffic-light limits for sugar, saturated fat, salt and fat (stricter for drinks), plus calories; fibre and protein add points.</div>
   </div>` : "";
   // Mark what the database flagged too, e.g. German compounds like "Magermilchpulver" the word lists miss.
-  const marks = [...a.no.filter(x => x.why !== "declared allergen").map(x => [x.name, "no"]), ...a.maybe.map(x => [x.name, "maybe"])];
+  const marks = [...a.no.filter(x => !x.allergen).map(x => [x.name, "no"]), ...a.maybe.map(x => [x.name, "maybe"])];
   const scanNotes = scan ? [
     scan.langs > 1 ? `The pack lists the ingredients in ${scan.langs} languages; the ${LANG_NAMES[scan.lang]} list was checked.` : "",
     scan.traces.length ? `Left out of the check: “${scan.traces.join(" ")}” Cross-contamination warnings don't make a product non-vegan, but matter for allergies.` : "",
@@ -849,7 +861,7 @@ if (!loadHistory().length) lookup("3017620422003");
 // Home-screen apps on iOS keep showing a cached copy of this page. On launch and whenever the app
 // comes back to the foreground, compare with the live page and switch to it if it's newer.
 // Bump APP_VERSION with every change you deploy.
-const APP_VERSION = "2026-10-06.1";
+const APP_VERSION = "2026-10-06.2";
 async function checkForUpdate() {
   try {
     const live = await (await fetch(`./?check=${Date.now()}`, { cache: "no-store" })).text();
